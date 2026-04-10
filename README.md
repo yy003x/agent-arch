@@ -1,93 +1,91 @@
-# Agent Arch
+# Agent Runtime
 
+面向生产场景的 Go Agent Runtime，强调显式状态机、可恢复执行、人机协作修复和清晰的模块边界。
 
+## 能力范围
 
-## Getting started
+- 单 run 单 runtime 实例
+- 有限且显式的状态机
+- 最多多轮执行，可按轮推进
+- LLM 超时或上游失败后进入 `waiting_human`
+- 支持 `Start`、`Block`、`Stop`、`Cancel`、`Continue`、`PatchContextAndResume`、`GetSnapshot`
+- 基于消息的上下文管理
+- 保留系统指令并按 token 预算截断上下文
+- 事件日志和执行快照持久化抽象
+- 当前提供内存仓储和 mock LLM
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 目录
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
+```text
+.
+├── cmd/
+│   └── agentd/
+│       └── main.go
+├── internal/
+│   ├── agent/
+│   ├── api/
+│   ├── contextx/
+│   ├── llm/
+│   └── repo/
+├── AGENTS.md
+├── go.mod
+└── README.md
 ```
-cd existing_repo
-git remote add origin https://dev.aminer.cn/autoglm/agent-arch.git
-git branch -M main
-git push -uf origin main
+
+## 模块说明
+
+- `internal/agent`: 运行时、状态机、事件、快照、错误和引擎
+- `internal/contextx`: 上下文 patch、token 估算和截断策略
+- `internal/llm`: LLM 请求/响应模型与 mock 客户端
+- `internal/repo`: 仓储实现，当前为内存版
+- `internal/api`: 面向控制面的 service 和 DTO
+- `cmd/agentd`: 单进程 demo
+
+## 状态机
+
+支持状态：
+
+- `created`
+- `running`
+- `waiting_llm`
+- `waiting_human`
+- `blocked`
+- `stopped`
+- `completed`
+- `cancelled`
+- `failed`
+
+状态迁移规则编码在 [state.go](/Users/young/go/agent-arch/internal/agent/state.go)。
+
+## 运行模型
+
+- `Engine` 负责创建和定位 run 对应的 `Runtime`
+- `Runtime` 持有单个 run 的内存态和串行化控制锁
+- LLM 调用期间状态切到 `waiting_llm`
+- 调用成功后追加 assistant 消息并推进轮次
+- 调用超时或上游失败后切到 `waiting_human`
+- 人工补丁通过 `PatchContextAndResume` 写回上下文并恢复执行
+
+## 快速运行
+
+```bash
+go run ./cmd/agentd
 ```
 
-## Integrate with your tools
+程序会启动一个 demo run，等待 mock LLM 执行完成后输出 JSON 快照。
 
-- [ ] [Set up project integrations](https://dev.aminer.cn/autoglm/agent-arch/-/settings/integrations)
+## 测试
 
-## Collaborate with your team
+沙箱环境下建议指定可写缓存目录：
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+```bash
+env GOCACHE=/tmp/go-build GOMODCACHE=/tmp/go-mod go test ./...
+```
 
-## Test and Deploy
+## 后续扩展方向
 
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- 增加 MySQL / Redis / Mongo 仓储实现
+- 抽出 HTTP 或 gRPC 控制面
+- 接入真实 tokenizer
+- 接入真实 LLM provider
+- 增加更细粒度的事件订阅和运行指标

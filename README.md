@@ -2,82 +2,94 @@
 
 A Go-based persona-driven single-agent runtime.
 
-agent-arch/
-├── AGENTS.md
-├── README.md
-├── go.mod
-├── cmd/
-│   └── server/
-│       └── main.go
-├── configs/
-│   ├── config.yaml
-│   └── personas/
-│       ├── default.yaml
-│       └── coder.yaml
-├── internal/
-│   ├── agent/
-│   │   ├── assembler.go
-│   │   ├── factory.go
-│   │   ├── runtime.go
-│   │   ├── service.go
-│   │   └── types.go
-│   ├── config/
-│   │   └── config.go
-│   ├── llm/
-│   │   ├── client.go
-│   │   ├── types.go
-│   │   ├── openai/
-│   │   │   └── client.go
-│   │   └── anthropic/
-│   │       └── client.go
-│   ├── memory/
-│   │   ├── manager.go
-│   │   ├── policy.go
-│   │   ├── retriever.go
-│   │   ├── shortterm.go
-│   │   ├── store.go
-│   │   └── summary.go
-│   ├── persona/
-│   │   ├── loader.go
-│   │   ├── model.go
-│   │   └── renderer.go
-│   ├── token/
-│   │   └── counter.go
-│   └── transport/
-│       ├── dto.go
-│       └── http.go
-└── test/
-    ├── adapter_test.go
-    ├── memory_test.go
-    └── persona_test.go
-
 ## Features
-- Create agent from persona profile
-- Unified OpenAI / Anthropic adapter
-- Context memory management up to 128K token budget
-- Short-term + rolling summary + retrieval stub
-- Config-driven provider/model switching
+- Create agent sessions from persona YAML profiles
+- Treat persona as prompt plus policy
+- Use a unified `llm.Client` interface for OpenAI and Anthropic
+- Map OpenAI requests to the Responses API shape
+- Map Anthropic requests to the Messages API shape
+- Assemble model context from persona instruction, rolling summary, retrieval stub, and recent raw turns
+- Enforce a hard context budget using reserved response and safety buffers
+- Expose a minimal in-memory HTTP API
 
-## Current Scope
-This repository implements an MVP only:
-- single agent
-- no tools
-- no MCP
-- no workflow engine
-- no vector DB
-
-## Architecture
-- `internal/persona`: persona loading and rendering
+## Project Layout
+- `cmd/server`: HTTP server entrypoint
+- `internal/config`: config loading
+- `internal/persona`: persona loader and renderer
 - `internal/llm`: unified client abstraction and provider adapters
-- `internal/memory`: short-term memory, rolling summary, context assembly
+- `internal/memory`: in-memory session memory, compaction, retrieval stub, and context assembly
 - `internal/agent`: runtime orchestration
-- `internal/transport`: minimal HTTP API
+- `internal/transport`: HTTP handlers
+- `test`: unit tests for the MVP requirements
 
-## APIs
-- `POST /v1/agents`
-- `POST /v1/chat`
-- `GET /v1/sessions/{session_id}/memory`
+## Configuration
+The server reads:
+- `configs/config.yaml`
+- `configs/personas/*.yaml`
+
+Provider credentials come from environment variables referenced by the config file:
+```bash
+export OPENAI_API_KEY=your-openai-key
+export ANTHROPIC_BASE_URL=https://api.anthropic.com
+export ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+```
 
 ## Run
 ```bash
 go run ./cmd/server
+```
+
+Default address:
+```text
+:8080
+```
+
+## Test
+```bash
+go test ./...
+```
+
+Quick manual Anthropic run:
+```bash
+ANTHROPIC_BASE_URL=https://api.anthropic.com \
+ANTHROPIC_AUTH_TOKEN=your-anthropic-token \
+./scripts/anthropic_5_turn.sh
+```
+
+## Example API Flow
+Create an agent:
+```bash
+curl -s http://localhost:8080/v1/agents \
+  -H 'Content-Type: application/json' \
+  -d '{"persona_id":"default"}'
+```
+
+Chat with the session returned above:
+```bash
+curl -s http://localhost:8080/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"sess_123","message":"Hello"}'
+```
+
+Five-turn Anthropic example:
+```bash
+curl -s http://localhost:8080/v1/agents \
+  -H 'Content-Type: application/json' \
+  -d '{"persona_id":"default","provider":"anthropic","model":"claude-sonnet-4-5"}'
+
+curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第1轮：请记住，我最喜欢的编程语言是 Go。"}'
+curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第2轮：我们聊聊 HTTP API 设计。"}'
+curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第3轮：再聊聊上下文裁剪策略。"}'
+curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第4轮：总结一下前面的实现约束。"}'
+curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第5轮：回答第1轮的问题，我最喜欢的编程语言是什么？"}'
+```
+
+Inspect session memory:
+```bash
+curl -s http://localhost:8080/v1/sessions/sess_123/memory
+```
+
+## Notes
+- Memory is in-process only for the MVP.
+- Retrieval is a stub and currently returns no long-term memory entries.
+- Provider-specific request mapping is isolated in `internal/llm/openai` and `internal/llm/anthropic`.

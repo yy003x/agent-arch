@@ -30,13 +30,23 @@ The server reads:
 Provider credentials come from environment variables referenced by the config file:
 ```bash
 export OPENAI_API_KEY=your-openai-key
-export ANTHROPIC_BASE_URL=https://api.anthropic.com
 export ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+```
+
+Current Anthropic-compatible default config is pre-set for MiniMax:
+```text
+base_url = https://api.minimaxi.com/anthropic
+model    = MiniMax-M2.7
 ```
 
 ## Run
 ```bash
-go run ./cmd/server
+make run
+```
+
+Development mode with auto-restart:
+```bash
+make dev
 ```
 
 Default address:
@@ -46,14 +56,37 @@ Default address:
 
 ## Test
 ```bash
-go test ./...
+make test
 ```
 
 Quick manual Anthropic run:
 ```bash
-ANTHROPIC_BASE_URL=https://api.anthropic.com \
-ANTHROPIC_AUTH_TOKEN=your-anthropic-token \
-./scripts/anthropic_5_turn.sh
+export ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+sh ./scripts/anthropic_5_turn.sh
+```
+
+## Make Targets
+```bash
+make help
+make fmt
+make test
+make build
+make run
+make dev
+make check
+```
+
+Recommended local test flow:
+```bash
+export ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+
+make run
+```
+
+In another terminal:
+```bash
+export ANTHROPIC_AUTH_TOKEN=your-anthropic-token
+sh ./scripts/anthropic_5_turn.sh
 ```
 
 ## Example API Flow
@@ -75,7 +108,7 @@ Five-turn Anthropic example:
 ```bash
 curl -s http://localhost:8080/v1/agents \
   -H 'Content-Type: application/json' \
-  -d '{"persona_id":"default","provider":"anthropic","model":"claude-sonnet-4-5"}'
+  -d '{"persona_id":"default","provider":"anthropic","model":"MiniMax-M2.7"}'
 
 curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第1轮：请记住，我最喜欢的编程语言是 Go。"}'
 curl -s http://localhost:8080/v1/chat -H 'Content-Type: application/json' -d '{"session_id":"sess_123","message":"第2轮：我们聊聊 HTTP API 设计。"}'

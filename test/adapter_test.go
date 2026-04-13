@@ -1,7 +1,11 @@
 package test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +13,7 @@ import (
 	"agent-arch/internal/agent"
 	"agent-arch/internal/config"
 	"agent-arch/internal/llm"
+	"agent-arch/internal/llm/anthropic"
 	"agent-arch/internal/memory"
 	"agent-arch/internal/persona"
 	"agent-arch/internal/token"
@@ -85,4 +90,71 @@ response_policy:
 	if resp.Model != "claude-test" {
 		t.Fatalf("expected persona model, got %s", resp.Model)
 	}
+}
+
+func TestAnthropicClientRetriesOn529(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	client := anthropic.NewClient("https://anthropic.test", "token-123", &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+
+			status := http.StatusOK
+			body := map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": "ok after retry"},
+				},
+				"usage": map[string]any{
+					"input_tokens":  10,
+					"output_tokens": 10,
+				},
+			}
+
+			if attempts < 5 {
+				status = 529
+				body = map[string]any{
+					"type": "error",
+					"error": map[string]any{
+						"type":    "overloaded_error",
+						"message": "overloaded_error (529)",
+					},
+				}
+			}
+
+			payload, err := json.Marshal(body)
+			if err != nil {
+				return nil, err
+			}
+
+			return &http.Response{
+				StatusCode: status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(bytes.NewReader(payload)),
+				Request:    req,
+			}, nil
+		}),
+	})
+
+	resp, err := client.Generate(context.Background(), llm.Request{
+		Model:           "MiniMax-M2.7",
+		System:          "system",
+		Messages:        []llm.Message{{Role: "user", Content: "hello"}},
+		MaxOutputTokens: 128,
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if resp.OutputText != "ok after retry" {
+		t.Fatalf("unexpected output: %q", resp.OutputText)
+	}
+	if attempts != 5 {
+		t.Fatalf("expected 5 attempts, got %d", attempts)
+	}
+}
+
+type roundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

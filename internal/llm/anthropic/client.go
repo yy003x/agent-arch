@@ -8,9 +8,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"agent-arch/internal/llm"
 )
+
+const maxRetriesOn529 = 5
 
 type Client struct {
 	baseURL    string
@@ -64,27 +67,45 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (llm.Response, e
 		return llm.Response{}, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(payload))
-	if err != nil {
-		return llm.Response{}, fmt.Errorf("build anthropic request: %w", err)
-	}
-	httpReq.Header.Set("x-api-key", c.authToken)
-	httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	httpReq.Header.Set("Content-Type", "application/json")
+	var raw []byte
+	var statusCode int
 
-	httpResp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return llm.Response{}, fmt.Errorf("send anthropic request: %w", err)
-	}
-	defer httpResp.Body.Close()
+	for attempt := 1; attempt <= maxRetriesOn529; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(payload))
+		if err != nil {
+			return llm.Response{}, fmt.Errorf("build anthropic request: %w", err)
+		}
+		httpReq.Header.Set("x-api-key", c.authToken)
+		httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+		httpReq.Header.Set("Content-Type", "application/json")
 
-	raw, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return llm.Response{}, fmt.Errorf("read anthropic response: %w", err)
+		httpResp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			return llm.Response{}, fmt.Errorf("send anthropic request: %w", err)
+		}
+
+		raw, err = io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if err != nil {
+			return llm.Response{}, fmt.Errorf("read anthropic response: %w", err)
+		}
+
+		statusCode = httpResp.StatusCode
+		if statusCode != http.StatusTooManyRequests && statusCode != 529 {
+			break
+		}
+		if attempt == maxRetriesOn529 {
+			break
+		}
+
+		if err := sleepWithContext(ctx, retryBackoff(attempt)); err != nil {
+			return llm.Response{}, fmt.Errorf("wait before anthropic retry: %w", err)
+		}
 	}
-	if httpResp.StatusCode >= 300 {
-		return llm.Response{}, fmt.Errorf("anthropic status %d: %s", httpResp.StatusCode, strings.TrimSpace(string(raw)))
+
+	if statusCode >= 300 {
+		return llm.Response{}, fmt.Errorf("anthropic status %d: %s", statusCode, strings.TrimSpace(string(raw)))
 	}
 
 	var parsed responseBody
@@ -104,6 +125,22 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (llm.Response, e
 		InputTokens:  parsed.Usage.InputTokens,
 		OutputTokens: parsed.Usage.OutputTokens,
 	}, nil
+}
+
+func retryBackoff(attempt int) time.Duration {
+	return time.Duration(attempt) * 200 * time.Millisecond
+}
+
+func sleepWithContext(ctx context.Context, wait time.Duration) error {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func buildMessages(messages []llm.Message) []messagePayload {

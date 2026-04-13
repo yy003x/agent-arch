@@ -17,8 +17,8 @@ providers:
   anthropic:
     enabled: true
     api_key: "${ANTHROPIC_AUTH_TOKEN}"
-    base_url: "${ANTHROPIC_BASE_URL}"
-    model: "claude-sonnet-4-5"
+    base_url: "https://api.minimaxi.com/anthropic"
+    model: "MiniMax-M2.7"
     timeout_seconds: 120
 
 memory:

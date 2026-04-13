@@ -4,12 +4,8 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PERSONA_ID="${PERSONA_ID:-default}"
-MODEL="${MODEL:-claude-sonnet-4-5}"
-
-if [[ -z "${ANTHROPIC_BASE_URL:-}" ]]; then
-  echo "ANTHROPIC_BASE_URL is required" >&2
-  exit 1
-fi
+MODEL="${MODEL:-MiniMax-M2.7}"
+PROVIDER="${PROVIDER:-anthropic}"
 
 if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
   echo "ANTHROPIC_AUTH_TOKEN is required" >&2
@@ -17,12 +13,19 @@ if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
 fi
 
 echo "Using server: ${BASE_URL}"
-echo "Using Anthropic endpoint: ${ANTHROPIC_BASE_URL}"
+echo "Using provider: ${PROVIDER}"
+echo "Using model: ${MODEL}"
 echo
+
+if ! curl -sS -o /dev/null --max-time 3 "${BASE_URL}/v1/agents"; then
+  echo "server is not reachable at ${BASE_URL}" >&2
+  echo "start it first with: make run" >&2
+  exit 1
+fi
 
 create_response="$(curl -sS "${BASE_URL}/v1/agents" \
   -H 'Content-Type: application/json' \
-  -d "{\"persona_id\":\"${PERSONA_ID}\",\"provider\":\"anthropic\",\"model\":\"${MODEL}\"}")"
+  -d "{\"persona_id\":\"${PERSONA_ID}\",\"provider\":\"${PROVIDER}\",\"model\":\"${MODEL}\"}")"
 
 session_id="$(printf '%s' "${create_response}" | sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p')"
 
@@ -46,6 +49,13 @@ chat() {
   response="$(curl -sS "${BASE_URL}/v1/chat" \
     -H 'Content-Type: application/json' \
     -d "{\"session_id\":\"${session_id}\",\"message\":\"${message}\"}")"
+
+  if [[ "${response}" == *"\"error\""* ]]; then
+    echo "Assistant JSON: ${response}"
+    echo
+    echo "request failed at ${turn}" >&2
+    exit 1
+  fi
 
   echo "Assistant JSON: ${response}"
   echo

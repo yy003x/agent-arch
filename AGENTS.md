@@ -1,258 +1,97 @@
 # AGENTS.md
 
-## 1. Mission
-
-Build a production-oriented Agent Runtime in Go.
-
-The system must support:
-
-- long-running agent execution across multiple rounds
-- explicit state management
-- human-in-the-loop intervention
-- pause / block / stop / continue / cancel controls
-- LLM timeout/failure recovery by allowing human context patching and resume
-- clean architecture without relying on heavy frameworks
-
-The implementation should prioritize correctness, readability, extensibility, and operational safety.
-
----
-
-## 2. Product Goal
-
-Implement an agent runtime that supports:
-
-- LLM call latency around 2–5 seconds per request
-- context window up to 128K
-- up to 10 rounds of execution per run
-- persistent agent state
-- human intervention when LLM fails or times out
-- ability to modify context and retry
-- runtime controls:
-  - block
-  - stop
-  - cancel
-  - continue
-- clear state transitions and resumable execution
-
-Do not build a toy demo only.
-Deliver code with production-style boundaries and clear extension points.
-
----
-
-## 3. Hard Constraints
-
-### 3.1 Language & stack
-
-- Use Go only
-- Prefer standard library first
-- Do not introduce heavy frameworks
-- Do not use Temporal, LangGraph, Kratos, Gin, or any workflow framework unless explicitly asked
-- Small helper libraries are acceptable only when clearly necessary
-
-### 3.2 Architecture
-
-Must use a clean modular design.
-
-Required modules:
-
-- `runtime`
-- `state machine`
-- `llm client abstraction`
-- `repository abstraction`
-- `context manager`
-- `control plane`
-- `event log / execution history`
-
-### 3.3 Runtime model
-
-Each agent run should have a clear execution owner.
-
-Preferred model:
-
-- one run = one runtime instance
-- state transitions must be serialized
-- avoid unsafe concurrent state mutation
-- prefer event-loop / actor-like control if suitable
-
-### 3.4 State management
-
-State must be explicit and finite.
-
-At minimum support:
-
-- `created`
-- `running`
-- `waiting_llm`
-- `waiting_human`
-- `blocked`
-- `stopped`
-- `completed`
-- `cancelled`
-- `failed`
-
-State transition rules must be explicit in code.
-
-### 3.5 Human intervention
-
-When LLM times out or fails:
-
-- do not silently discard the run
-- move the run into `waiting_human`
-- preserve current context, last error, current round, and execution history
-- allow operator to patch context
-- allow resume after patch
-
-### 3.6 Control operations
-
-Must support APIs or service methods for:
-
-- `Start`
-- `Block`
-- `Stop`
-- `Cancel`
-- `Continue`
-- `PatchContextAndResume`
-- `GetSnapshot`
-
-### 3.7 Context handling
-
-Context must be managed carefully.
-
-Requirements:
-
-- support message-based context
-- preserve system instructions
-- support append and replace patch operations
-- include token-budget-aware truncation strategy
-- do not blindly send the whole history forever
-- keep recent messages and pinned instructions preferentially
-
-For now, token estimation can be approximate, but code must be designed so real tokenizer integration can be added later.
-
-### 3.8 Persistence
-
-Do not hardcode everything in memory.
-
-Required:
-
-- define repository interfaces first
-- provide at least an in-memory implementation
-- design code so MySQL / Redis / Mongo can be plugged in later
-
-### 3.9 Failure handling
-
-Must distinguish:
-
-- timeout
-- cancellation
-- upstream LLM error
-- invalid state transition
-- repository persistence failure
-
-Do not swallow errors.
-
-### 3.10 Code quality
-
-All code must be:
-
-- idiomatic Go
-- small cohesive files
-- clear naming
-- minimal but meaningful comments
-- no over-abstraction
-- no speculative generic frameworks
-
----
-
-## 4. Coding Style
-
-Follow these rules strictly.
-
-### 4.1 General
-
-- Favor simple structures over clever abstractions
-- Prefer explicit code over magic
-- Keep functions focused
-- Avoid giant files when code grows
-- Avoid deeply nested logic where possible
-
-### 4.2 Interfaces
-
-Define interfaces at the consumer side, not the producer side.
-
-Examples:
-
-- `LLMClient`
-- `AgentRepo`
-
-Do not create interfaces for everything.
-
-### 4.3 Context usage
-
-- Pass `context.Context` explicitly where needed
-- Never store request-scoped context in struct fields permanently
-- Timeouts for LLM calls must use derived contexts
-
-### 4.4 Concurrency
-
-- Be conservative with goroutines
-- Concurrency must not break state consistency
-- State transitions should happen in one serialized path
-- If using channels, document ownership clearly
-
-### 4.5 Logging
-
-Use simple structured logging abstraction or standard log package.
-
-Log important events:
-
-- run start
-- llm request start/end
-- timeout/error
-- state transition
-- human patch
-- stop/block/cancel/continue
-
-### 4.6 Errors
-
-- Wrap errors with context
-- Return actionable errors
-- Use sentinel errors only when useful
-- Invalid transitions must be explicit
-
----
-
-## 5. Directory Layout
-
-Use this layout unless there is a strong reason not to:
-
-```text
-.
-├── AGENTS.md
-├── cmd/
-│   └── agentd/
-│       └── main.go
-├── internal/
-│   ├── agent/
-│   │   ├── engine.go
-│   │   ├── runtime.go
-│   │   ├── state.go
-│   │   ├── command.go
-│   │   ├── snapshot.go
-│   │   ├── event.go
-│   │   └── errors.go
-│   ├── contextx/
-│   │   ├── manager.go
-│   │   ├── truncate.go
-│   │   └── token_estimator.go
-│   ├── llm/
-│   │   ├── client.go
-│   │   └── mock.go
-│   ├── repo/
-│   │   ├── repo.go
-│   │   └── memory.go
-│   └── api/
-│       ├── service.go
-│       └── dto.go
-├── go.mod
-└── README.md
+## Project Goal
+Build a Go-based single-agent runtime.
+
+Core requirements:
+- Create agent instances from persona profiles.
+- Support OpenAI and Anthropic through a unified LLM adapter.
+- Implement context memory management up to 128K tokens.
+- Keep the architecture extensible for future tools / MCP / workflow support.
+- Current phase is MVP only. Do not implement multi-agent orchestration.
+
+## Architecture Principles
+1. Persona is not just a prompt string.
+   Persona = Prompt + Policy.
+2. Business code must not directly depend on provider-specific request formats.
+3. Memory assembly must be explicit, testable, and bounded by token budget.
+4. Final model context is dynamically assembled from:
+   - persona/system instruction
+   - recent turns
+   - rolling summary
+   - retrieved long-term memory
+5. Keep the assembled input under 131072 tokens.
+6. Always reserve output token budget and safety buffer.
+
+## Scope for MVP
+Implement:
+- persona YAML loading
+- persona rendering
+- unified llm.Client interface
+- OpenAI adapter
+- Anthropic adapter
+- short-term memory store
+- rolling summary compaction
+- context assembly with token budget trimming
+- minimal HTTP API:
+  - POST /v1/agents
+  - POST /v1/chat
+  - GET /v1/sessions/{session_id}/memory
+
+Do not implement yet:
+- MCP
+- tool calling
+- multi-agent workflows
+- vector database
+- auth/rbac
+- frontend
+- deployment manifests
+- asynchronous job system
+
+## Code Style
+- Always pass context.Context
+- No global mutable state
+- Return wrapped errors with context
+- Keep package boundaries clean
+- Prefer small interfaces
+- Avoid unnecessary abstraction
+- Keep provider-specific mapping isolated in provider adapters
+- Write unit tests for core logic
+- No real remote API calls in unit tests
+
+## Memory Policy
+- Max context budget: 131072 tokens
+- Reserve response tokens
+- Reserve safety buffer
+- Keep recent turns in raw form
+- Compress older turns into rolling summary blocks
+- Retrieval memory can be a stub in MVP
+- Summary blocks should be structured, not only free text
+
+## Testing Requirements
+Add tests for:
+- persona loader
+- provider selection from config/persona
+- memory compaction threshold behavior
+- context trimming under token budget
+- runtime with mocked llm client
+
+## Implementation Order
+1. config
+2. persona
+3. llm abstraction
+4. provider adapters
+5. memory manager
+6. agent runtime
+7. HTTP handlers
+8. tests
+9. README
+
+## Deliverables
+- Clean project structure
+- Compilable Go code
+- Minimal working HTTP service
+- Config-driven provider switching
+- Persona-driven agent creation
+- Memory manager with 128K token policy
+- README with run instructions

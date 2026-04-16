@@ -37,6 +37,7 @@ func TestRuntimeChatWithMockedClient(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
+	traceDir := filepath.Join(dir, "logs")
 	if err := os.WriteFile(filepath.Join(dir, "default.yaml"), []byte(`
 id: "default"
 system_prompt: "You are helpful."
@@ -63,6 +64,9 @@ response_policy:
 		},
 		Providers: map[string]config.ProviderConfig{
 			"openai": {Enabled: true, TimeoutSeconds: 1},
+		},
+		Debug: config.DebugConfig{
+			LLMTraceDir: traceDir,
 		},
 		Memory: config.MemoryConfig{
 			MaxContextTokens:       1024,
@@ -101,6 +105,15 @@ response_policy:
 
 	if len(mem.Turns) != 2 {
 		t.Fatalf("expected two stored turns, got %d", len(mem.Turns))
+	}
+
+	tracePath := filepath.Join(traceDir, created.SessionID, "turn_0001.json")
+	raw, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("read trace log: %v", err)
+	}
+	if !strings.Contains(string(raw), "\"request\":") || !strings.Contains(string(raw), "\"response\":") || !strings.Contains(string(raw), "\"trace_id\":") {
+		t.Fatalf("unexpected trace log contents: %s", string(raw))
 	}
 }
 

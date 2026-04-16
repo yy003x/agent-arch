@@ -31,6 +31,9 @@ memory:
   compression_threshold: 0.80
   keep_recent_turns: 8
 
+debug:
+  llm_trace_dir: "logs/llm_traces"
+
 storage:
   session_store: "memory"
   summary_store: "memory"

@@ -13,6 +13,7 @@ type Config struct {
 	Agent     AgentConfig               `yaml:"agent"`
 	Providers map[string]ProviderConfig `yaml:"providers"`
 	Memory    MemoryConfig              `yaml:"memory"`
+	Debug     DebugConfig               `yaml:"debug"`
 	Storage   StorageConfig             `yaml:"storage"`
 }
 
@@ -51,6 +52,11 @@ type StorageConfig struct {
 	RetrievalStore string `yaml:"retrieval_store"`
 }
 
+type DebugConfig struct {
+	LLMTraceDir      string `yaml:"llm_trace_dir"`
+	LLMRequestLogDir string `yaml:"llm_request_log_dir"`
+}
+
 func Load(_ context.Context, path string) (Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -66,6 +72,12 @@ func Load(_ context.Context, path string) (Config, error) {
 
 	if cfg.Server.HTTPAddr == "" {
 		cfg.Server.HTTPAddr = ":8080"
+	}
+	if cfg.Debug.LLMTraceDir == "" {
+		cfg.Debug.LLMTraceDir = cfg.Debug.LLMRequestLogDir
+	}
+	if cfg.Debug.LLMTraceDir == "" {
+		cfg.Debug.LLMTraceDir = "logs/llm_traces"
 	}
 	applyProviderDefaults(&cfg)
 

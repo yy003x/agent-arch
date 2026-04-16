@@ -1,0 +1,29 @@
+# Build output
+/bin/
+
+# Logs and runtime artifacts
+/log/
+/logs/
+*.log
+*.out
+*.pid
+*.tmp
+*.temp
+
+# Local env / overrides
+.env
+.env.*
+
+# Test and coverage artifacts
+coverage.out
+coverage.txt
+*.coverprofile
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Go workspace noise
+*.test
